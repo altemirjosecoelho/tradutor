@@ -13,13 +13,32 @@ from googletrans import Translator
 import speech_recognition as sr
 from PIL import Image, ImageTk, ImageDraw
 import os
-import pyttsx3
+import pyttsx3  # Fallback
 import pyperclip
 import numpy as np
 import pyaudio
 import wave
 import io
 import base64
+
+# TTS com IA (opcional)
+try:
+    from TTS.api import TTS
+    TTS_AVAILABLE = True
+    print("✅ TTS com IA disponível")
+except ImportError:
+    TTS_AVAILABLE = False
+    print("⚠️ TTS com IA não disponível")
+
+# TTS com Google (recomendado)
+try:
+    from gtts import gTTS
+    import playsound
+    GTTS_AVAILABLE = True
+    print("✅ Google TTS disponível")
+except ImportError:
+    GTTS_AVAILABLE = False
+    print("⚠️ Google TTS não disponível")
 
 class CompactDictationGUI:
     def __init__(self):
@@ -90,7 +109,59 @@ class CompactDictationGUI:
     
     def setup_speech_engine(self):
         """Configura o motor de síntese de voz"""
+        self.speech_engine = None
+        self.tts_ai = None
+        self.gtts_available = GTTS_AVAILABLE
+        
+        # Prioridade: Google TTS > TTS com IA > Fallback
+        if self.gtts_available:
+            print("🚀 Google TTS será usado como sistema principal")
+            self.setup_fallback_tts()  # Configurar fallback para casos offline
+        elif TTS_AVAILABLE:
+            try:
+                self.setup_ai_tts()
+            except Exception as e:
+                print(f"⚠️ Erro ao configurar TTS com IA: {e}")
+                self.setup_fallback_tts()
+        else:
+            self.setup_fallback_tts()
+    
+    def setup_ai_tts(self):
+        """Configura TTS com IA usando Coqui TTS"""
         try:
+            print("🚀 Configurando TTS com IA...")
+            
+            # Inicializar TTS com modelo em português
+            print("📥 Baixando modelo de IA...")
+            self.tts_ai = TTS(model_name="tts_models/pt/cv/vits")
+            
+            print("✅ TTS com IA configurado com sucesso")
+            print(f"📊 Modelo: {self.tts_ai.model_name}")
+            
+            # Testar se o modelo está funcionando
+            print("🧪 Testando modelo de IA...")
+            test_text = "Teste de voz"
+            
+            # Usar o método correto da API
+            test_file = "test_ai.wav"
+            self.tts_ai.tts_to_file(text=test_text, file_path=test_file)
+            
+            if os.path.exists(test_file):
+                print("✅ Teste de IA bem-sucedido")
+                os.remove(test_file)  # Limpar arquivo de teste
+            else:
+                print(f"⚠️ Teste de IA falhou - arquivo não encontrado: {test_file}")
+            
+        except Exception as e:
+            print(f"❌ Erro ao configurar TTS com IA: {e}")
+            print("🔄 Usando fallback pyttsx3")
+            self.setup_fallback_tts()
+    
+    def setup_fallback_tts(self):
+        """Configura TTS de fallback usando pyttsx3"""
+        try:
+            print("🔄 Configurando TTS de fallback...")
+            
             self.speech_engine = pyttsx3.init()
             
             # Configurar voz
@@ -111,8 +182,9 @@ class CompactDictationGUI:
             # Configurar volume
             self.speech_engine.setProperty('volume', 0.9)
             
+            print("✅ TTS de fallback configurado")
         except Exception as e:
-            print(f"⚠️ Erro ao configurar síntese de voz: {e}")
+            print(f"❌ Erro no TTS de fallback: {e}")
             self.speech_engine = None
     
     def setup_gui(self):
@@ -893,9 +965,12 @@ class CompactDictationGUI:
     
     def narrate_text(self, text=None):
         """Narra o texto especificado"""
-        if not self.speech_engine:
+        if not self.speech_engine and not self.tts_ai and not self.gtts_available:
             messagebox.showwarning("Aviso", "Síntese de voz não disponível!")
+            print("❌ Nenhum sistema de TTS disponível")
             return
+        
+        print(f"🎯 Iniciando narração... Google TTS: {self.gtts_available}, TTS IA: {self.tts_ai is not None}, Fallback: {self.speech_engine is not None}")
         
         try:
             if text is None:
@@ -914,10 +989,137 @@ class CompactDictationGUI:
     def _narrate_thread(self, text):
         """Thread para narração"""
         try:
+            # Prioridade: Google TTS > TTS com IA > Fallback
+            if self.gtts_available:
+                print("🌐 Usando Google TTS para narração...")
+                try:
+                    self._narrate_with_google(text)
+                except Exception as e:
+                    print(f"❌ Falha na narração com Google TTS: {e}")
+                    if self.tts_ai:
+                        print("🎤 Tentando TTS com IA...")
+                        try:
+                            self._narrate_with_ai(text)
+                        except Exception as e2:
+                            print(f"❌ Falha na narração com IA: {e2}")
+                            if self.speech_engine:
+                                print("🔄 Tentando fallback...")
+                                self._narrate_with_fallback(text)
+                            else:
+                                print("❌ Nenhum sistema de TTS disponível")
+                    elif self.speech_engine:
+                        print("🔄 Tentando fallback...")
+                        self._narrate_with_fallback(text)
+                    else:
+                        print("❌ Nenhum sistema de TTS disponível")
+            elif self.tts_ai:
+                print("🎤 Usando TTS com IA para narração...")
+                try:
+                    self._narrate_with_ai(text)
+                except Exception as e:
+                    print(f"❌ Falha na narração com IA: {e}")
+                    if self.speech_engine:
+                        print("🔄 Tentando fallback...")
+                        self._narrate_with_fallback(text)
+                    else:
+                        print("❌ Nenhum sistema de TTS disponível")
+            elif self.speech_engine:
+                print("🔄 Usando TTS de fallback para narração...")
+                self._narrate_with_fallback(text)
+            else:
+                print("❌ Nenhum sistema de TTS disponível")
+                
+        except Exception as e:
+            print(f"❌ Erro na narração: {e}")
+    
+    def _narrate_with_ai(self, text):
+        """Narração usando TTS com IA"""
+        try:
+            print(f"🎤 Gerando áudio com IA para: '{text}'")
+            
+            # Gerar áudio com IA
+            audio_file = "temp_ai_audio.wav"
+            self.tts_ai.tts_to_file(text=text, file_path=audio_file)
+            
+            print(f"📁 Arquivo de áudio gerado: {audio_file}")
+            
+            # Verificar se o arquivo foi criado
+            if not os.path.exists(audio_file):
+                print(f"❌ Arquivo não encontrado: {audio_file}")
+                raise FileNotFoundError(f"Arquivo de áudio não foi criado: {audio_file}")
+            
+            # Reproduzir áudio
+            import pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(audio_file)
+            pygame.mixer.music.play()
+            
+            print("🔊 Reproduzindo áudio...")
+            
+            # Aguardar fim da reprodução
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.1)
+            
+            # Limpar arquivo temporário
+            if os.path.exists(audio_file):
+                os.remove(audio_file)
+                print("🗑️ Arquivo temporário removido")
+                
+            print("✅ Narração com IA concluída")
+            
+        except Exception as e:
+            print(f"❌ Erro na narração com IA: {e}")
+            print("🔄 Tentando fallback...")
+            self._narrate_with_fallback(text)
+    
+    def _narrate_with_google(self, text):
+        """Narração usando Google TTS"""
+        try:
+            print(f"🌐 Gerando áudio com Google TTS para: '{text}'")
+            
+            # Criar arquivo temporário único
+            import tempfile
+            import os
+            
+            # Gerar áudio com Google TTS
+            tts = gTTS(text=text, lang='pt', slow=False)
+            
+            # Salvar em arquivo temporário
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as temp_file:
+                temp_file_path = temp_file.name
+            
+            tts.save(temp_file_path)
+            print(f"📁 Arquivo de áudio gerado: {temp_file_path}")
+            
+            # Reproduzir áudio
+            print("🔊 Reproduzindo áudio...")
+            playsound.playsound(temp_file_path, block=True)
+            
+            # Limpar arquivo temporário
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                print("🗑️ Arquivo temporário removido")
+                
+            print("✅ Narração com Google TTS concluída")
+            
+        except Exception as e:
+            print(f"❌ Erro na narração com Google TTS: {e}")
+            raise e
+    
+    def _narrate_with_fallback(self, text):
+        """Narração usando TTS de fallback"""
+        try:
+            if self.speech_engine is None:
+                print("❌ TTS de fallback não disponível")
+                return
+                
+            print("🔄 Usando TTS de fallback...")
             self.speech_engine.say(text)
             self.speech_engine.runAndWait()
+            print("✅ Narração com fallback concluída")
         except Exception as e:
-            print(f"Erro na narração: {e}")
+            print(f"❌ Erro na narração com fallback: {e}")
+            print("💡 Sugestão: Verifique se pyttsx3 está funcionando")
     
     def copy_translation(self):
         """Copia a tradução para o clipboard"""

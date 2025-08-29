@@ -13,6 +13,16 @@ pynput>=1.7.6
 # Síntese de voz
 pyttsx3>=2.90
 
+# TTS com IA (opcional)
+TTS>=0.22.0
+torch>=2.0.0
+torchaudio>=2.0.0
+pygame>=2.5.0
+
+# TTS com APIs externas (recomendado)
+gtts>=2.5.0
+playsound>=1.3.0
+
 # Processamento de imagem
 Pillow>=9.0.0
 
